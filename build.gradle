@@ -1,8 +1,17 @@
 /*
-   Project traffic_world
+   Project SymbolicAIAgent
+   interpreter/ is a directory that enriches this project with chatbdi
 
-   Gradle build file for Jason Application
-   March 01, 2025 - 21:44:05
+   Layout:
+   - symbolicaiagent/                (project root)
+     - src/java
+     - src/env
+     - src/resources
+     - interpreter/
+       - src/agt
+       - src/env
+       - (optional) src/resources
+       - (optional) lib/
 */
 
 defaultTasks 'run'
@@ -15,45 +24,66 @@ apply plugin: 'java'
 
 repositories {
     mavenCentral()
-    maven { url "https://raw.githubusercontent.com/jacamo-lang/mvn-repo/master" }
-    maven { url "https://jade.tilab.com/maven/" }
+    maven { url = uri("https://raw.githubusercontent.com/jacamo-lang/mvn-repo/master") }
+    maven { url = uri("https://jade.tilab.com/maven/") }
 }
 
 dependencies {
-    implementation 'io.github.jason-lang:jason:3.2.0'
-    implementation 'io.socket:socket.io-client:1.0.0' // Added Socket.IO dependency
+    // interpreter module
+    implementation 'io.github.jason-lang:jason-interpreter:3.3.0'
 
-    // to use locally installed jars:
+    // SymbolicAIAgent deps
+    implementation 'io.socket:socket.io-client:1.0.0'
+
+    // interpreter deps
+    implementation 'org.java-websocket:Java-WebSocket:1.5.6'
+    implementation 'org.json:json:20230227'
+    implementation 'com.formdev:flatlaf:3.0'
+    implementation 'com.github.rjeschke:txtmark:0.13'
+
+    // local jars (optional)
     implementation fileTree(dir: 'lib', include: '*.jar')
     implementation fileTree(dir: 'jia', include: ['*.jar'])
+    implementation fileTree(dir: 'interpreter/lib', include: '*.jar')
 }
 
 sourceSets {
     main {
         java {
+            // SymbolicAIAgent
             srcDir 'src/java'
             srcDir 'src/env'
             srcDir '.' // some old jason apps store .java files in project root
+
+            // interpreter
+            srcDir 'interpreter/src/agt'
+            srcDir 'interpreter/src/env'
         }
         resources {
             srcDir 'src/resources'
+            srcDir 'interpreter/src/resources'
         }
     }
 }
 
 task run (type: JavaExec, dependsOn: 'classes') {
-    description 'runs the application'
+    description = 'runs the application'
     mainClass = 'jason.infra.local.RunLocalMAS'
     args = ['kitchen.mas2j']
     // options:
     //     args = ['traffic_world.mas2j', '--debug', '--no-net', '--empty-mas']
     //     args = ['traffic_world.mas2j', '--log-conf', 'l.p'] // to use file l.p to configure logging
-    classpath sourceSets.main.runtimeClasspath
+    classpath = sourceSets.main.runtimeClasspath
 }
 
 task runJade (type: JavaExec, dependsOn: 'classes') {
-    description 'runs the application with Jade infrastructure'
+    description = 'runs the application with Jade infrastructure'
     mainClass = 'jason.infra.jade.RunJadeMAS'
     args = [ 'kicthen.mas2j' ]
-    classpath sourceSets.main.runtimeClasspath
+    classpath = sourceSets.main.runtimeClasspath
+}
+
+javadoc {
+    destinationDir = file("$buildDir/docs/javadoc")
+    options.memberLevel = JavadocMemberLevel.PRIVATE
 }
