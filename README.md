@@ -1,7 +1,6 @@
 # Design and Implementation of Human–AI Cooperation in a Video Game
 
-**Author:** Margarita H. Radeva
-**Author:** Gianluca Scollo
+**Author:** Margarita H. Radeva & Gianluca Scollo
 
 ---
 
@@ -14,6 +13,8 @@ This repository contains a **Jason 3.3.0**–based **Symbolic AI** agent that in
 
 ## Links & Related Repos
 
+- **Original Symbolic AI:**
+  https://github.com/margaritaradeva/SymbolicAIAgent.git
 - **Overcooked-AI (core environment):**
   https://github.com/GianlucaScollo/OvercookedAI.git
 - **Original Overcooked-AI (core environment):**

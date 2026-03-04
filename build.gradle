@@ -18,10 +18,6 @@ defaultTasks 'run'
 
 apply plugin: 'java'
 
-// set version of group for your project
-//version '1.0'
-//group   'io.github.jason-lang'
-
 repositories {
     mavenCentral()
     maven { url = uri("https://raw.githubusercontent.com/jacamo-lang/mvn-repo/master") }

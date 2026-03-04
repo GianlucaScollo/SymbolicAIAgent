@@ -1,13 +1,13 @@
 package chatbdi;
 
 import java.util.List;
+import java.util.ArrayList;
 // // import java.util.Map;
 import java.util.logging.Level;
 // // import java.util.logging.Logger;
 // // import java.util.HashMap;
 // // import java.util.Set;
 // // import java.util.HashSet;
-// // import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Queue;
 import java.util.UUID;
@@ -29,9 +29,27 @@ import java.net.ConnectException;
 import java.io.IOException;
 import java.rmi.RemoteException;
 
+// ── Socket.IO ──────────────────────────────────────────────────────────────
+import io.socket.client.IO;
+import io.socket.client.Socket;
+import io.socket.emitter.Emitter;
+import org.json.JSONException;
+import org.json.JSONObject;
+import org.json.JSONArray;
+// ────────────────────────────────────────────────────────────────────────────
+
 /**
- * Interpreter is an Agent Architecture that enables the user to interact with the agents in the mas
- * @author Andrea Gatti
+ * Interpreter is an Agent Architecture that enables the user to interact with
+ * the agents in the MAS via web Socket.IO chat.
+ *
+ * Web chat flow:
+ *   Browser → Flask chat:send → broadcast chat:message
+ *        → Interpreter receives chat:message
+ *        → handleUserMsg() → nl2kqml() → sendMsg() to Jason agent
+ *        → Jason agent replies → checkMail() → kqml2nl()
+ *        → socket.emit("chat:send") back to Flask → broadcast to browser
+ *
+ * @author Andrea Gatti  (Socket.IO integration: GianlucaScollo)
  */
 public class Interpreter extends AgArch {
 
@@ -40,18 +58,21 @@ public class Interpreter extends AgArch {
 
     /** Ollama manages the connection with the daemon */
     private Ollama ollama;
-    /** ChatUI manages the GUI */
-    private ChatUI chatUI;
     /** EmbeddingSpace manages the embedding space */
     private EmbeddingSpace embSpace;
 
+    // ── Socket.IO state ────────────────────────────────────────────────────
+    /** Socket.IO connection to the Flask server */
+    private Socket socket;
     /**
-     * Initializes all what is needed for the interpreter:
-     * <ul>
-     * <li> the Ollama client </li>
-     * <li> the embedding space </li>
-     * <li> the chat UI </li>
-     * </ul>
+     * True when we are in a chat phase (pre-game or post-game).
+     * False during an active game — messages are ignored.
+     */
+    private volatile boolean in_chat_phase = false;
+    // ────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Initialises Ollama client, EmbeddingSpace, ChatUI and the Socket.IO connection.
      */
     @Override
     public void init() throws Exception {
@@ -64,15 +85,164 @@ public class Interpreter extends AgArch {
             embSpace = new EmbeddingSpace( ollama );
             initEmbeddingSpace();
             logInfo( "Initializing the Embedding Space" );
-            chatUI = new ChatUI( getTS().getLogger(), getAgName() );
+            // ── Socket.IO setup ────────────────────────────────────────────────
+            initSocket();
+            // ────────────────────────────────────────────────────────────────────
         } catch ( ConnectException ce ) {
             logSevere( ce.getMessage() );
             logFine( ce.getStackTrace().toString() );
         } catch ( RemoteException re ) {
             logSevere( "REMOTE EXCEPTION! " + re.getMessage() );
             logFine( re.getStackTrace().toString() );
+        } catch (Exception e) {
+            logSevere( e.getMessage() );
+            logFine( e.getStackTrace().toString() );
+        }
+        
+    }
+
+
+    // =========================================================================
+    //  Socket.IO — connection and event handling
+    // =========================================================================
+
+    /**
+     * Creates the Socket.IO connection to the Flask server and registers all
+     * the event listeners needed for the web chat.
+     */
+    private void initSocket() {
+        try {
+            socket = IO.socket("http://localhost");
+
+            // ── CONNECT ───────────────────────────────────────────────────
+            socket.on(Socket.EVENT_CONNECT, new Emitter.Listener() {
+                @Override
+                public void call(Object... args) {
+                    logInfo("[SOCKET] Connected to Flask server");
+                    try {
+                        // Join the shared lobby room
+                        JSONObject chatJoin = new JSONObject().put("room", "lobby");
+                        socket.emit("chat:join", chatJoin);
+                        in_chat_phase = true;
+                        logInfo("[CHAT] Entered lobby — pre-game chat active.");
+                    } catch (JSONException e) {
+                        logSevere("[SOCKET] Error joining lobby: " + e.getMessage());
+                    }
+                }
+            });
+
+            // ── CHAT:MESSAGE — incoming message from the web user ─────────
+            socket.on("chat:message", new Emitter.Listener() {
+                @Override
+                public void call(Object... args) {
+                    // Only handle messages during chat phases, not during an active game
+                    if (!in_chat_phase) return;
+                    if (args.length == 0) return;
+
+                    try {
+                        JSONObject payload = new JSONObject(args[0].toString());
+                        String sender  = payload.optString("sender", "unknown");
+                        String msg    = payload.optString("message", "").trim();
+
+                        if (msg.isEmpty()) return;
+                        // Ignore our own replies to avoid infinite loops
+                        if (sender.equals("staychef")) return;
+
+                        logInfo("[CHAT] Received from web — sender: " + sender + ", msg: " + msg);
+
+                        new Thread(() -> {
+                            try {
+                                
+                                // Determine receivers: broadcast to all agents in the MAS
+                                List<String> receivers = new ArrayList<>(getRuntimeServices().getAgentsName());
+                                // The Interpreter agent itself is not a target
+                                receivers.remove(getAgName());
+
+                                UUID id = UUID.randomUUID();
+
+                                // Translate NL → KQML and send to Jason agent(s)
+
+                                String plainContent = msg.replaceAll("<[^>]*>", "");
+                                int result = handleUserMsg(id, receivers, plainContent);
+
+                                if (result == -1 && socket != null && socket.connected()) {
+                                    try {
+                                        JSONObject errPayload = new JSONObject()
+                                            .put("message", "Error: translation failed.")
+                                            .put("sender", "system");
+                                        socket.emit("chat:send", errPayload);
+                                    } catch (JSONException e1) { 
+                                        logSevere( e1.getMessage() );
+                                        logFine( e1.getStackTrace().toString() );
+                                    }
+                                } else if (result == 0 && socket != null && socket.connected()) {
+                                    try {
+                                        JSONObject warnPayload = new JSONObject()
+                                            .put("message", "Error: translation partially failed.")
+                                            .put("sender", "system");
+                                        socket.emit("chat:send", warnPayload);
+                                    } catch (JSONException e2) { 
+                                        logSevere( e2.getMessage() );
+                                        logFine( e2.getStackTrace().toString() );
+                                    }
+                                }
+                            } catch (Exception e) {
+                                logSevere("[CHAT] Error processing web message: " + e.getMessage());
+                            }
+                        }).start();
+
+                    } catch (JSONException e) {
+                        logSevere("[SOCKET] JSON error in chat:message: " + e.getMessage());
+                    }
+                }
+            });
+
+            // ── GAME PHASE TRANSITIONS ────────────────────────────────────
+
+            // Game started → disable chat responses
+            socket.on("start_game", new Emitter.Listener() {
+                @Override
+                public void call(Object... args) {
+                    in_chat_phase = false;
+                    logInfo("[GAME] Game started — web chat disabled.");
+                }
+            });
+
+            // Game ended → re-enable chat
+            socket.on("end_game", new Emitter.Listener() {
+                @Override
+                public void call(Object... args) {
+                    in_chat_phase = true;
+                    logInfo("[CHAT] Game ended — web chat re-enabled.");
+                }
+            });
+
+            // Lobby ended (user left before game started) → keep chat active
+            socket.on("end_lobby", new Emitter.Listener() {
+                @Override
+                public void call(Object... args) {
+                    in_chat_phase = true;
+                    logInfo("[CHAT] Lobby ended — web chat active.");
+                }
+            });
+
+            // ── DISCONNECT ────────────────────────────────────────────────
+            socket.on(Socket.EVENT_DISCONNECT, new Emitter.Listener() {
+                @Override
+                public void call(Object... args) {
+                    in_chat_phase = false;
+                    logInfo("[SOCKET] Disconnected from Flask server.");
+                }
+            });
+
+            socket.connect();
+            logInfo("[SOCKET] socket.connect() called.");
+
+        } catch (Exception e) {
+            logSevere("[SOCKET] Exception in initSocket(): " + e.getMessage());
         }
     }
+
 
     /**
      * Interpreter overwrites the checkMail method: 
@@ -89,13 +259,23 @@ public class Interpreter extends AgArch {
         
         while( !mbox.isEmpty() ) {
             Message m = mbox.poll();
-            new Thread( () -> {
+
+            new Thread(() -> {
                 String sender = m.getSender();
-                UUID id = chatUI.genUUID();
-                chatUI.showMsg( id, sender );
-                String msg = kqml2nl( m );
-                chatUI.setMsg( id ,msg );
+                String nlMsg = kqml2nl(m);
+                if (socket != null && socket.connected() && in_chat_phase) {
+                    try {
+                        JSONObject replyPayload = new JSONObject()
+                            .put("message", nlMsg)
+                            .put("sender",  "staychef");
+                        socket.emit("chat:send", replyPayload);
+                        logInfo("[CHAT] Sent reply to web: " + nlMsg);
+                    } catch (JSONException e) {
+                        logSevere("[SOCKET] Error sending reply: " + e.getMessage());
+                    }
+                }
             }).start();
+
         }
     }
 
@@ -118,7 +298,7 @@ public class Interpreter extends AgArch {
                 if ( !agNames.contains( receivers.get(i) ) ) {
                     logInfo("The agent " + receivers.get(i) + " does not exist" );
                     partial = true;
-                    chatUI.showAgentNotFoundNotice( id, receivers.get(i) );
+                    //chatUI.showAgentNotFoundNotice( id, receivers.get(i) );
                     receivers.remove( receivers.get(i) );
                 }
             }
@@ -136,12 +316,12 @@ public class Interpreter extends AgArch {
             return -1;
         }
         // show the generated KQML translation under the user's message
-        try {
-            if ( chatUI != null )
-                chatUI.setKQML( id, m.getIlForce(), m.getPropCont().toString() );
-        } catch ( Exception e ) {
-            logSevere( "Cannot show KQML translation: " + e.getMessage() );
-        }
+        // try {
+        //    if ( chatUI != null )
+        //        chatUI.setKQML( id, m.getIlForce(), m.getPropCont().toString() );
+        //} catch ( Exception e ) {
+        //    logSevere( "Cannot show KQML translation: " + e.getMessage() );
+        //}
         // Broadcast if no receivers are set
         if ( receivers.isEmpty() ) {
             logInfo("Broadcasting the message");
