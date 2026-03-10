@@ -112,7 +112,9 @@ public class Interpreter extends AgArch {
      */
     private void initSocket() {
         try {
-            socket = IO.socket("http://localhost");
+            // Connect to Overcooked server on localhost via socket.IO
+            // (the server listens at the 5000 port inside the container)
+            socket = IO.socket("http://localhost:5000");
 
             // ── CONNECT ───────────────────────────────────────────────────
             socket.on(Socket.EVENT_CONNECT, new Emitter.Listener() {
@@ -123,11 +125,21 @@ public class Interpreter extends AgArch {
                         // Join the shared lobby room
                         JSONObject chatJoin = new JSONObject().put("room", "lobby");
                         socket.emit("chat:join", chatJoin);
-                        in_chat_phase = true;
-                        logInfo("[CHAT] Entered lobby — pre-game chat active.");
+                        in_chat_phase = false;
+                        socket.emit("agent:chat_ready", new JSONObject().put("status", "ready"));
+                        logInfo("[CHAT] Entered lobby — agent:chat_ready emitted.");
                     } catch (JSONException e) {
                         logSevere("[SOCKET] Error joining lobby: " + e.getMessage());
                     }
+                }
+            });
+
+            // Check if the agent is ready to chat
+            socket.on("agent:chat_ready", new Emitter.Listener() {
+                @Override
+                public void call(Object... args) {
+                    in_chat_phase = true;
+                    logInfo("[CHAT] Chat active.");
                 }
             });
 
@@ -232,6 +244,18 @@ public class Interpreter extends AgArch {
                 public void call(Object... args) {
                     in_chat_phase = false;
                     logInfo("[SOCKET] Disconnected from Flask server.");
+                }
+            });
+
+            // ── AGENT_SHUTDOWN ────────────────────────────────────────────────
+            socket.on("agent_shutdown", new Emitter.Listener() {
+                @Override
+                public void call(Object... args) {
+                    in_chat_phase = false;
+                    logInfo("[CHAT] agent_shutdown — closing socket.");
+                    if (socket != null && socket.connected()) {
+                        socket.disconnect();
+                    }
                 }
             });
 

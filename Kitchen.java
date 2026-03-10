@@ -379,14 +379,29 @@ public class Kitchen extends Environment {
     public void init(String[] args) {
         try {
             // Connect to Overcooked server on localhost via socket.IO
-            socket = IO.socket("http://localhost");
+            // (the server listens at the 5000 port inside the container)
+            socket = IO.socket("http://localhost:5000");
             
             // SOCKET.EVENT_CONNECT is triggered when the socket successfully connects to
             // Overcooked-AI. Used to join a game
             socket.on(Socket.EVENT_CONNECT, new Emitter.Listener() {
                 @Override
                 public void call(Object... args) {
-                    System.out.println("Connected to Overcooked server");
+                    System.out.println("[Kitchen] Connected to Overcooked server");
+                    try {
+                        socket.emit("java_connected", new JSONObject().put("status", "ready"));
+                    } catch (JSONException e) { 
+                        e.printStackTrace(); 
+                    }
+                }
+            });
+
+            // WAITING is triggered when the game is created
+            socket.on("waiting", new Emitter.Listener() {
+                @Override
+                public void call(Object... args) {
+                    // Avoid multiple joins if multiple waiting events arrive
+                    if (active_game) return;
                     try {
                         // put some default parameters if creation of the game fails so we can create a new one
                         JSONObject data_to_join = new JSONObject()
@@ -407,11 +422,12 @@ public class Kitchen extends Environment {
                     }
                 }
             });
+
             // will receive it when Flask says the game has started
             socket.on("start_game", new Emitter.Listener() {
                 @Override
                 public void call(Object... args) {
-                    System.out.println("Game is now active (user pressed start button)");
+                    System.out.println("[Kitchen] Game is now active (user pressed start button)");
                     active_game = true;
                 }
             });
@@ -420,7 +436,7 @@ public class Kitchen extends Environment {
             socket.on("end_game", new Emitter.Listener() {
                 @Override
                 public void call(Object... args) {
-                    System.out.println("Received end_game. Game over");
+                    System.out.println("[Kitchen] Received end_game. Game over");
                     // Clear percepts - all of them
                     clearPercepts();
                     active_game = false;
@@ -431,7 +447,7 @@ public class Kitchen extends Environment {
             socket.on("end_lobby", new Emitter.Listener() {
                 @Override
                 public void call(Object... args) {
-                    System.out.println("Received end_lobby. Game over");
+                    System.out.println("[Kitchen] Received end_lobby. Game over");
                     clearPercepts();
                     active_game = false;
                 }
@@ -446,6 +462,25 @@ public class Kitchen extends Environment {
                     active_game = false;
                 }
             });
+
+            // AGENT_SHUTDOWN is triggered when we want to shutdown the gradle process
+            socket.on("agent_shutdown", new Emitter.Listener() {
+                @Override
+                public void call(Object... args) {
+                    System.out.println("[Kitchen] agent_shutdown — waiting for Interpreter cleanup...");
+                    clearPercepts();
+                    active_game = false;
+                    socket.disconnect();
+                    try {
+                        Thread.sleep(2000);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                    System.out.println("[Kitchen] JVM shutdown.");
+                    System.exit(0);
+                }
+            });
+
 
             // receoved when the game starts and used to feed the agent with initial beliefs
             socket.on("java_layout", new Emitter.Listener() {
@@ -560,11 +595,13 @@ public class Kitchen extends Environment {
                                 addPercept("staychef", ASSyntax.createLiteral("recipes", new ListTermImpl()));
                             }
                             
-                            // Let the agent begin - this percept is what starts it
-                            addPercept("staychef", Literal.parseLiteral("begin(now)"));
                             // Precumpute the reachability for both players
                             computeInitialReachability(agentX, agentY,1);
                             computeInitialReachability(humanX, humanY,0);
+
+                            // Let the agent begin - this percept is what starts it
+                            addPercept("staychef", Literal.parseLiteral("begin(now)"));
+                            socket.emit("agent:plans_ready", new JSONObject().put("status", "ready"));
                         } catch (JSONException e) {
                             e.printStackTrace();
                         }
@@ -755,6 +792,7 @@ public class Kitchen extends Environment {
                     }
                 }
             });
+            
             // Finally, connect the socket
             socket.connect();
         } catch (Exception e) {

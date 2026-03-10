@@ -35,7 +35,9 @@ import static chatbdi.Tools.*;
  */
 public class Ollama {
 	/** The url at which the Ollama server listens */
-    private String URL = "http://localhost:11434/api/";
+    private String URL = (System.getenv("OLLAMA_HOST") != null
+		? System.getenv("OLLAMA_HOST")
+		: "http://host.docker.internal:11434") + "/api/";
 	/** The embedding model to use */
     protected String EMB_MODEL;
 	/** The generation model to use */
