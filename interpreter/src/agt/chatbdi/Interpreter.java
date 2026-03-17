@@ -267,6 +267,12 @@ public class Interpreter extends AgArch {
         }
     }
 
+    /**
+     * Helper method to check if DEBUG_KQML is enabled
+     */
+    private boolean isDebugKqmlEnabled() {
+        return Boolean.parseBoolean(System.getProperty("debug.kqml", "false"));
+    }
 
     /**
      * Interpreter overwrites the checkMail method: 
@@ -339,13 +345,23 @@ public class Interpreter extends AgArch {
             logInfo( "The generated message is null");
             return -1;
         }
-        // show the generated KQML translation under the user's message
-        // try {
-        //    if ( chatUI != null )
-        //        chatUI.setKQML( id, m.getIlForce(), m.getPropCont().toString() );
-        //} catch ( Exception e ) {
-        //    logSevere( "Cannot show KQML translation: " + e.getMessage() );
-        //}
+        // show the generated KQML translation
+        try {
+            if (isDebugKqmlEnabled()) {
+                String debugMsg = "[KQML] ilf: " + m.getIlForce() + ", content: " + m.getPropCont().toString();
+                try {
+                    JSONObject replyPayload = new JSONObject()
+                        .put("message", debugMsg)
+                        .put("sender", "system");
+                    socket.emit("chat:send", replyPayload);
+                    logInfo("[CHAT] Sent reply to web: " + debugMsg);
+                } catch (JSONException e) {
+                    logSevere("[SOCKET] Error sending reply: " + e.getMessage());
+                }
+            }
+        } catch ( Exception e ) {
+            logSevere( "Cannot show KQML translation: " + e.getMessage() );
+        }
         // Broadcast if no receivers are set
         if ( receivers.isEmpty() ) {
             logInfo("Broadcasting the message");

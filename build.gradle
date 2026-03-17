@@ -70,6 +70,12 @@ task run (type: JavaExec, dependsOn: 'classes') {
     //     args = ['traffic_world.mas2j', '--debug', '--no-net', '--empty-mas']
     //     args = ['traffic_world.mas2j', '--log-conf', 'l.p'] // to use file l.p to configure logging
     classpath = sourceSets.main.runtimeClasspath
+
+    doFirst {
+        String debugKqml = System.getenv('ORG_GRADLE_PROJECT_debugKqml') ?: 'false'
+        jvmArgs = ["-Ddebug.kqml=${debugKqml}"]
+        println "[gradle] Setting debug.kqml=${debugKqml}"
+    }
 }
 
 task runJade (type: JavaExec, dependsOn: 'classes') {
@@ -77,6 +83,12 @@ task runJade (type: JavaExec, dependsOn: 'classes') {
     mainClass = 'jason.infra.jade.RunJadeMAS'
     args = [ 'kicthen.mas2j' ]
     classpath = sourceSets.main.runtimeClasspath
+
+    doFirst {
+        String debugKqml = System.getenv('ORG_GRADLE_PROJECT_debugKqml') ?: 'false'
+        jvmArgs = ["-Ddebug.kqml=${debugKqml}"]
+        println "[gradle] Setting debug.kqml=${debugKqml}"
+    }
 }
 
 javadoc {
