@@ -11,6 +11,8 @@ import java.util.logging.Level;
 import java.util.Collection;
 import java.util.Queue;
 import java.util.UUID;
+import java.util.regex.Pattern;
+import java.util.regex.Matcher;
 
 import jason.asSyntax.*;
 // // import jason.asSemantics.*;
@@ -165,16 +167,20 @@ public class Interpreter extends AgArch {
                         new Thread(() -> {
                             try {
                                 
-                                // Determine receivers: broadcast to all agents in the MAS
-                                List<String> receivers = new ArrayList<>(getRuntimeServices().getAgentsName());
-                                // The Interpreter agent itself is not a target
-                                receivers.remove(getAgName());
+                                // Determine receivers
+                                List<String> receivers = extractReceivers(msg);
+                                // if receivers is empty broadcast the message to all agents in the MAS
+                                if (receivers.isEmpty()) {
+                                    receivers = new ArrayList<>(getRuntimeServices().getAgentsName());
+                                    // The Interpreter agent itself is not a target
+                                    receivers.remove(getAgName());
+                                }
 
                                 UUID id = UUID.randomUUID();
 
                                 // Translate NL → KQML and send to Jason agent(s)
 
-                                String plainContent = msg.replaceAll("<[^>]*>", "");
+                                String plainContent = cleanMessage(msg);
                                 int result = handleUserMsg(id, receivers, plainContent);
 
                                 if (result == -1 && socket != null && socket.connected()) {
@@ -185,17 +191,15 @@ public class Interpreter extends AgArch {
                                         socket.emit("chat:send", errPayload);
                                     } catch (JSONException e1) { 
                                         logSevere( e1.getMessage() );
-                                        logFine( e1.getStackTrace().toString() );
                                     }
                                 } else if (result == 0 && socket != null && socket.connected()) {
                                     try {
                                         JSONObject warnPayload = new JSONObject()
-                                            .put("message", "Error: translation partially failed.")
+                                            .put("message", "Warning: Partial sending. Some agents do not exist.")
                                             .put("sender", "system");
                                         socket.emit("chat:send", warnPayload);
                                     } catch (JSONException e2) { 
                                         logSevere( e2.getMessage() );
-                                        logFine( e2.getStackTrace().toString() );
                                     }
                                 }
                             } catch (Exception e) {
@@ -268,6 +272,56 @@ public class Interpreter extends AgArch {
     }
 
     /**
+     * Strips HTML tags and @mentions from a message
+     * @param msg the message to clean
+     * @return cleaned message without HTML tags and @mentions
+     */
+    private String cleanMessage(String msg) {
+        // Remove HTML tags
+        String cleaned = msg.replaceAll("<[^>]*>", "");
+        // Remove @mentions
+        cleaned = cleaned.replaceAll("\\s*@\\S+", "");
+        return cleaned.trim();
+    }
+
+    /**
+     * Extracts receiver names from a message using @mention pattern
+     * @param msg the message to parse
+     * @return List of receiver agent names (without @)
+     */
+    private List<String> extractReceivers(String msg) {
+        List<String> receivers = new ArrayList<>();
+        if (!msg.contains("@")) {
+            return receivers;
+        }
+        
+        Pattern pattern = Pattern.compile("@\\w+");
+        Matcher matcher = pattern.matcher(msg);
+        
+        while (matcher.find()) {
+            String mention = matcher.group();
+            receivers.add(mention.substring(1)); // Remove the @
+        }
+        
+        return receivers;
+    }
+    
+    /**
+     * Warning message emitted when a tagged agent does not exist
+     * @param agName agent name not found
+     */
+    private void sendMessageAgentNotFound(String agName) {
+        try {
+            JSONObject errPayload = new JSONObject()
+                .put("message", "Warning: agent @" + agName + " does not exist")
+                .put("sender", "system");
+            socket.emit("chat:send", errPayload);
+        } catch (JSONException e) { 
+            logSevere( e.getMessage() );
+        }
+    }
+
+    /**
      * Helper method to check if DEBUG_KQML is enabled
      */
     private boolean isDebugKqmlEnabled() {
@@ -324,14 +378,16 @@ public class Interpreter extends AgArch {
         boolean partial = false;
         if ( !receivers.isEmpty() ) {
             logInfo("There are receivers" );
+            List<String> toRemove = new ArrayList<>();
             for ( int i=0; i<receivers.size(); i++ ) {
                 if ( !agNames.contains( receivers.get(i) ) ) {
                     logInfo("The agent " + receivers.get(i) + " does not exist" );
                     partial = true;
-                    //chatUI.showAgentNotFoundNotice( id, receivers.get(i) );
-                    receivers.remove( receivers.get(i) );
+                    sendMessageAgentNotFound( receivers.get(i) );
+                    toRemove.add( receivers.get(i) );
                 }
             }
+            receivers.removeAll(toRemove);
             if ( receivers.isEmpty() ) {
                 logInfo("Receivers is now empty!");
                 return -1;
