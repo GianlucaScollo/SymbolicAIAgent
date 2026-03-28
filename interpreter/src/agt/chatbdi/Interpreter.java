@@ -182,7 +182,8 @@ public class Interpreter extends AgArch {
 
                                 String plainContent = cleanMessage(msg);
                                 int result = handleUserMsg(id, receivers, plainContent);
-
+                                
+                                // Translation Failed
                                 if (result == -1 && socket != null && socket.connected()) {
                                     try {
                                         JSONObject errPayload = new JSONObject()
@@ -192,7 +193,8 @@ public class Interpreter extends AgArch {
                                     } catch (JSONException e1) { 
                                         logSevere( e1.getMessage() );
                                     }
-                                } else if (result == 0 && socket != null && socket.connected()) {
+                                } // Partial sending
+                                else if (result == 0 && socket != null && socket.connected()) {
                                     try {
                                         JSONObject warnPayload = new JSONObject()
                                             .put("message", "Warning: Partial sending. Some agents do not exist.")
@@ -375,6 +377,7 @@ public class Interpreter extends AgArch {
 
         updateEmbeddingSpace();
 
+        // Check if the are receivers and that exist
         boolean partial = false;
         if ( !receivers.isEmpty() ) {
             logInfo("There are receivers" );
@@ -401,7 +404,7 @@ public class Interpreter extends AgArch {
             logInfo( "The generated message is null");
             return -1;
         }
-        // show the generated KQML translation
+        // Show the generated KQML translation
         try {
             if (isDebugKqmlEnabled()) {
                 String debugMsg = "[KQML] ilf: " + m.getIlForce() + ", content: " + m.getPropCont().toString();
