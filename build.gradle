@@ -70,15 +70,6 @@ task run (type: JavaExec, dependsOn: 'classes') {
     //     args = ['traffic_world.mas2j', '--debug', '--no-net', '--empty-mas']
     //     args = ['traffic_world.mas2j', '--log-conf', 'l.p'] // to use file l.p to configure logging
     classpath = sourceSets.main.runtimeClasspath
-
-    // getting debug.kqml flag from OvercookedAI used to send the generated KQML translation to the chat web
-    // the value of the flag is setted on docker-compose.yml of OvercookedAI
-    // the flag is passed to the SymbolicAIAgent environment variable from the function start_symbolic_agent() in app.py of OvercookedAI
-    doFirst {
-        String debugKqml = System.getenv('ORG_GRADLE_PROJECT_debugKqml') ?: 'false'
-        jvmArgs = ["-Ddebug.kqml=${debugKqml}"]
-        println "[gradle] Setting debug.kqml=${debugKqml}"
-    }
 }
 
 javadoc {

@@ -406,17 +406,15 @@ public class Interpreter extends AgArch {
         }
         // Show the generated KQML translation
         try {
-            if (isDebugKqmlEnabled()) {
-                String debugMsg = "[KQML] ilf: " + m.getIlForce() + ", content: " + m.getPropCont().toString();
-                try {
-                    JSONObject replyPayload = new JSONObject()
-                        .put("message", debugMsg)
-                        .put("sender", "system");
-                    socket.emit("chat:send", replyPayload);
-                    logInfo("[CHAT] Sent reply to web: " + debugMsg);
-                } catch (JSONException e) {
-                    logSevere("[SOCKET] Error sending reply: " + e.getMessage());
-                }
+            String debugMsg = "[KQML] ilf: " + m.getIlForce() + ", content: " + m.getPropCont().toString();
+            try {
+                JSONObject replyPayload = new JSONObject()
+                    .put("message", debugMsg)
+                    .put("sender", "system");
+                socket.emit("chat:send", replyPayload);
+                logInfo("[CHAT] kqml translation sent to web: " + debugMsg);
+            } catch (JSONException e) {
+                logSevere("[SOCKET] Error sending reply: " + e.getMessage());
             }
         } catch ( Exception e ) {
             logSevere( "Cannot show KQML translation: " + e.getMessage() );
