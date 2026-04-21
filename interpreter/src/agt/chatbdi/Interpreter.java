@@ -56,7 +56,7 @@ import org.json.JSONArray;
 public class Interpreter extends AgArch {
 
     /** Supported Illocutionary forces for the classifier */
-    private final String[] SUPPORTED_ILF = { "tell", "askOne", "askAll" };
+    private final String[] SUPPORTED_ILF = { "tell", "askOne", "askAll", "askHow"};
 
     /** Ollama manages the connection with the daemon */
     private Ollama ollama;
@@ -453,12 +453,21 @@ public class Interpreter extends AgArch {
         Literal ilf = ollama.classify( msg );
         // Generate the final term
         Literal term = generateTerm( receivers, ilf, msg );
-        // If the computed ilf is an askHow add the triggering +! part to the term
-        if ( ilf.equalsAsStructure( createLiteral( "askHow" ) ) )
-            term = new Trigger( Trigger.TEOperator.add, Trigger.TEType.achieve, term );
+
+        // We use a generic Object because the Jason Message constructor accepts an Object for its content. 
+        // This allows us to pass either a standard Literal or a Trigger.
+        Object content = term;
+        
+        // If the computed ilf is 'askHow', the agent expects a Plan Trigger rather than a simple Literal.
+        // We wrap the literal in an achievement trigger (e.g., "+!term").
+        String ilfString = ilf.getFunctor();
+        if ( ilfString.equals( "askHow" ) ) {
+            Trigger t = new Trigger( Trigger.TEOperator.add, Trigger.TEType.achieve, term );
+            content = t;
+        }
         logInfo( "Generated: \n ilf: " + ilf + "\n term: " + term );
 
-        return new Message( ilf.toString(), this.getAgName(), null, term );
+        return new Message( ilf.toString(), this.getAgName(), null, content );
     }
 
     /**
@@ -486,8 +495,10 @@ public class Interpreter extends AgArch {
     private Literal generateTerm( List<String> receivers, Literal ilf, String msg ) throws ParseException {
         msg = msg.replaceAll( "\\s*@\\S+", "" );
         String subSpace = "terms";
-        if ( ilf.equals( "achieve" ) )
+        String ilfString = ilf.getFunctor(); 
+        if ( ilfString.equals( "achieve" ) || ilfString.equals( "askHow" ) ) {
             subSpace = "plans";
+        }
         Literal nearest = embSpace.findNearest( receivers, subSpace, msg );
         try {
             System.out.println( "[LOG] " + nearest );

@@ -44,6 +44,8 @@ public class Ollama {
     protected String GEN_MODEL;
 	/** The name that will be assigned to the model that translates KQML to NL */
     private final String LOG2NL_MODEL = "logic-to-nl";
+	/** The name that will be assigned to the model that translates tellHow to NL */
+    private final String TELLHOW2NL_MODEL = "tellhow-to-nl";
 	/** The name that will be assigned to the model that translates NL to KQML */
     private final String NL2LOG_MODEL = "nl-to-logic";
 	/** The name that will be assigned to the model that classifies the Illocutionary Force */
@@ -61,7 +63,8 @@ public class Ollama {
     private String LOG2NL_PROMPT;
     private String NL2LOG_MODELFILE;
     private String LOG2NL_MODELFILE;
-    private String CLASS_MODELFILE ;
+	private String TELLHOW2NL_MODELFILE;
+    private String CLASS_MODELFILE;
 
 	/**
 	 * List of the supported Illocutionary Forces
@@ -84,6 +87,7 @@ public class Ollama {
 		LOG2NL_PROMPT = stts.getUserParameter("log2nl_prompt");
 		NL2LOG_MODELFILE = stts.getUserParameter("nl2log_model");
 		LOG2NL_MODELFILE = stts.getUserParameter("log2nl_model");
+		TELLHOW2NL_MODELFILE = stts.getUserParameter("tellhow2nl_model");
 		CLASS_MODELFILE = stts.getUserParameter("class_model");
 		GEN_MODEL = stts.getUserParameter( "gen_model" );
 		EMB_MODEL = stts.getUserParameter( "emb_model" );
@@ -110,6 +114,7 @@ public class Ollama {
 		System.out.println( "Initializing generation models" );
 		create( GEN_MODEL, NL2LOG_MODEL, TEMPERATURE, NL2LOG_MODELFILE, SEED );
 		create( GEN_MODEL, LOG2NL_MODEL, TEMPERATURE, LOG2NL_MODELFILE, SEED );
+		create( GEN_MODEL, TELLHOW2NL_MODEL, TEMPERATURE, TELLHOW2NL_MODELFILE, SEED );
 		create( GEN_MODEL, CLASS_MODEL, TEMPERATURE, CLASS_MODELFILE, SEED );
 	}
 
@@ -314,6 +319,11 @@ public class Ollama {
 	 * @throws IOException if fails to open LOG2NL_PROMPT
 	 */
 	public String generate( Message msg ) throws IOException {
+		// If the msg ilf is tellHow we need to do more thinghs
+		if ( msg.getIlForce().equals( "tellHow" ) ) {
+			return translateTellHow( msg );
+		}
+
 		String prompt = Files.readString( Path.of( LOG2NL_PROMPT ) )
 			.replace( "SENDER", msg.getSender() )
 			.replace( "ILFORCE", msg.getIlForce() )
@@ -416,4 +426,94 @@ public class Ollama {
 			e.printStackTrace();
 		}
 	}
+
+	/**
+	 * Dedicated method to translate a procedural response (tellHow) into Natural Language.
+	 * When the agent answers an 'askHow' query, it replies with a 'tellHow' message
+	 * containing a list of plans (Triggers, Contexts, and Bodies) that match the request.
+	 * This method parses those Jason Plan objects and formats them into a structured prompt 
+	 * for the LLM to summarize into a fluid, conversational response.
+	 * 
+	 * @param msg the KQML Message containing the tellHow response (expected to be a list of Plans)
+	 * @return a natural language explanation of the procedure
+	 */
+	private String translateTellHow( Message msg ) {
+		try {
+			Object rawContent = msg.getPropCont();
+			if (rawContent == null) {
+				return "Received an empty procedural explanation.";
+			}
+			
+			Literal content;
+			if (rawContent instanceof Literal) {
+				content = (Literal) rawContent;
+			} else {
+				content = ASSyntax.parseLiteral(rawContent.toString());
+			}
+			
+			// A valid tellHow response should contain a list of available plans
+			if ( content.isList() ) {
+				ListTerm list = (ListTerm) content;
+				
+				// If the list is empty, Jason found no plans matching that trigger in its PlanLibrary
+				if (list.isEmpty()) {
+					return "I'm sorry, I don't have any plans or knowledge on how to do that.";
+				}
+				
+				String promptData = "Here are the logical options for the requested task:\n\n";
+				int optionCount = 1;
+				
+				for ( Term plan_term : list ) {
+					if (plan_term instanceof Plan) {
+						Plan plan = (Plan) plan_term;	
+						
+						// Print the goal/trigger only on the first iteration to avoid repetition
+						if (optionCount == 1) {
+							promptData += "Task (Trigger): " + plan.getTrigger() + "\n\n";
+						}
+						
+						LogicalFormula context = plan.getContext();
+						PlanBody body = plan.getBody();
+						
+						promptData += "Option " + optionCount + ":\n";
+						promptData += " - Context (conditions): " + (context != null ? context.toString() : "None") + "\n";
+						promptData += " - Steps to execute:\n";
+						
+						int size = 0;
+						if (body != null) {
+							size = body.getPlanSize();
+						}
+
+						PlanBody currentBody = body;
+						
+						// Iterate over the steps inside the plan's body
+						for ( int i = 0; i < size; i++ ) {
+							if (currentBody == null) break;
+							Term step = currentBody.getBodyTerm();
+							currentBody = currentBody.getBodyNext();
+							promptData += "    " + (i+1) + ". " + step + "\n";
+						}
+						promptData += "\n";
+					} else {
+						// Fallback: if the item in the list is not read as a native Plan, just dump its string
+						promptData += "Option " + optionCount + ": " + plan_term.toString() + "\n\n";
+					}
+					optionCount++;
+				}
+				
+				System.out.println( "[DEBUG] TELLHOW PROMPT DATA:\n" + promptData );
+				
+				JSONObject ans = new JSONObject( generate( TELLHOW2NL_MODEL, promptData ) );
+				return ans.getString( "response" ).replaceAll( "(?s)<think>.*?</think>", "");
+			}
+			
+			return "I received a procedural explanation, but it is not formatted as a list.";
+		} catch (Exception e) {
+			e.printStackTrace();
+			return "Internal Error translating the procedure: " + e.getMessage();
+		}
+	}
+
+
+
 }
