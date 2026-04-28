@@ -25,3 +25,8 @@ cooking(pizza, oven), askHow should be translated to "Can you explain to me how 
 
 revolution(france), askOne should be translated to "Tell me a revolution that happened in France"
 revolution(france), askAll should be translated to "Tell all the revolutions that happened in France"
+
+understood_rule(focus, cooking), tell should be translated to "Understood! I will focus only on cooking."
+understood_rule(focus, serving), tell should be translated to "Got it! I will take care of serving."
+understood_rule(ignore, ingredients), tell should be translated to "Alright, I will ignore the ingredients."
+understood_rule(ignore, plates), tell should be translated to "Okay, I will ignore the plates from now on."
