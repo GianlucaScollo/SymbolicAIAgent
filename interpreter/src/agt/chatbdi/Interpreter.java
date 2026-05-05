@@ -324,13 +324,6 @@ public class Interpreter extends AgArch {
     }
 
     /**
-     * Helper method to check if DEBUG_KQML is enabled
-     */
-    private boolean isDebugKqmlEnabled() {
-        return Boolean.parseBoolean(System.getProperty("debug.kqml", "false"));
-    }
-
-    /**
      * Interpreter overwrites the checkMail method: 
      * every message received by the agent triggers a translation to Natural Language and displays it on the chat.
      */
@@ -407,6 +400,7 @@ public class Interpreter extends AgArch {
         // Show the generated KQML translation
         try {
             String debugMsg = "[KQML] ilf: " + m.getIlForce() + ", content: " + m.getPropCont().toString();
+            // trying to send KQML translation to server 
             try {
                 JSONObject replyPayload = new JSONObject()
                     .put("message", debugMsg)
@@ -415,6 +409,30 @@ public class Interpreter extends AgArch {
                 logInfo("[CHAT] kqml translation sent to web: " + debugMsg);
             } catch (JSONException e) {
                 logSevere("[SOCKET] Error sending reply: " + e.getMessage());
+            }
+            // trying to check if the agent will replay the message user sent
+            try {
+                boolean expectsReply = true; // default
+                if ("tell".equals(m.getIlForce()) && m.getPropCont() != null) {
+                    String contentStr = m.getPropCont().toString().replaceAll("\\s+", "");
+                    
+                    // list with specific contents that will generate a response message
+                    java.util.List<String> specialTells = java.util.Arrays.asList(
+                        "ignore(serving)", "ignore(cooking)", "focus(serving)", "focus(cooking)"
+                    );
+                    
+                    if (!specialTells.contains(contentStr)) {
+                        expectsReply = false;
+                    }
+                }
+                
+                JSONObject ackPayload = new JSONObject()
+                    .put("expects_reply", expectsReply);
+                
+                socket.emit("chat:ack", ackPayload);
+                logInfo("[CHAT] Sent chat:ack to web: expects_reply=" + expectsReply);
+            } catch (JSONException e) {
+                logSevere("[SOCKET] Error sending ack: " + e.getMessage());
             }
         } catch ( Exception e ) {
             logSevere( "Cannot show KQML translation: " + e.getMessage() );
