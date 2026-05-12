@@ -22,6 +22,11 @@ Do not use any other words for these functors. Map the user's intent as follows:
 - Map to **"cooking"**: if the sentence mentions cooking, preparing, ingredients, onions, tomatoes, or food.
 - Map to **"serving"**: if the sentence mentions serving, delivering, soups, dishes, or plates.
 
+### CRITICAL RULE FOR "HOW MANY" QUESTIONS:
+When the user asks a question starting with "How many...", they are requesting a numerical quantity. 
+You MUST use an uppercase variable (e.g., "X") for the numeric argument. 
+NEVER copy a 0 or any other number from the domain example in this case.
+
 ### Quoting Rules (Prolog Term Convention):
 
 - For each argument position, follow the quoting pattern found in the domain examples:
@@ -66,7 +71,7 @@ Do not use any other words for these functors. Map the user's intent as follows:
 
 - For **askOne**:
  - If the sentence provides all argument values, use them.
- - If a value is missing, use a variable (e.g., "X", "Y").
+ - If a value is requested or missing, use an uppercase variable (e.g., "X", "Y").
  - Do NOT invent or infer values for missing arguments.
 
 - For **askAll**:
@@ -104,6 +109,10 @@ Do not use any other words for these functors. Map the user's intent as follows:
 - Incorrect:  
  {"functor": "order", "arg0": "beer", "arg1": 8} // Incorrect, do not invent numbers
 
+4. Complete the JSON according to performative rules:
+ - tell/askHow: only arguments present in the message. Use "_" for unmentioned arguments.
+ - askOne/askAll: present arguments + uppercase variables for requested information.
+
 ### Translation Process:
 1. Identify the functor from the best fitting term in the domain.
 2. Recognize the performative (tell, askOne, askAll, askHow).
@@ -111,6 +120,7 @@ Do not use any other words for these functors. Map the user's intent as follows:
 4. Complete the JSON according to performative rules:
  - **tell/askHow**: only arguments present in the message. Use "_" for unmentioned arguments.
  - **askOne/askAll**: present arguments + uppercase variables for requested information.
+ - Use "X" for arguments representing the answer to "How many".
  - Use "_" for unmentioned arguments.
  - NEVER use values from examples unless they are present in the input sentence.
  - NEVER invent or infer values not explicitly stated in the sentence.
@@ -136,6 +146,33 @@ The input sentence is "What is the id of the last order?". The best fitting term
 **Output:**
 ```json
 {"functor": "last_order_id", "arg0": "X"}
+```
+
+**Input askOne for counters:**
+```
+The input sentence is "How many soups did you serve during the shift?". The best fitting term in the domain is {'functor': 'soups_served', 'arg0': 0}. The extracted performative is askOne.
+```
+**Output:**
+```json
+{"functor": "soups_served", "arg0": "X"}
+```
+
+**Input askOne for counters:**
+```
+The input sentence is "How many times have you grabbed ingredients in the game?". The best fitting term in the domain is {'functor': 'grabbed_ingredients', 'arg0': 0}. The extracted performative is askOne.
+```
+**Output:**
+```json
+{"functor": "grabbed_ingredients", "arg0": "X"}
+```
+
+**Input askOne for counters:**
+```
+The input sentence is "How many ingredients have you passed to me?". The best fitting term in the domain is {'functor': 'ingredients_passed', 'arg0': 0}. The extracted performative is askOne.
+```
+**Output:**
+```json
+{"functor": "ingredients_passed", "arg0": "X"}
 ```
 
 **Input askAll with partial information:**
@@ -186,6 +223,15 @@ The input sentence is "I tell you to only focus on cooking". The best fitting te
 **Input tell with synonyms for serving:**
 ```
 The input sentence is "I tell you to only care of serving the food". The best fitting term in the domain is {'functor': 'focus', 'arg0': 'serving'}. The extracted performative is tell.
+```
+**Output:**
+```json
+{"functor": "focus", "arg0": "serving"}
+```
+
+**Input tell with complex sentence for serving:**
+```
+The input sentence is "Please focus on serving, I will handle the rest.". The best fitting term in the domain is {'functor': 'focus', 'arg0': 'serving'}. The extracted performative is tell.
 ```
 **Output:**
 ```json

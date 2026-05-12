@@ -43,6 +43,27 @@ countInRecipe(I, [X|T], N) :-
 // Checks if two positions (X,Y) and (Z,M) are adjacent
 adjacent(X, Y, Z, M) :- (X = Z & ((Y=M+1) | (Y=M-1))) | (Y=M & ((X = Z + 1) | (X = Z - 1))).
 
+// -------------------------------------
+// Action Counters (for Post-Game Chat) 
+// -------------------------------------
+
+// --- Inert Vocabulary for Chat Embeddings ---
+
+// How many soups did you serve during the shift?
+chat_vocab(soups_served("X")).
+
+// How many times have you grabbed ingredients in the game?
+chat_vocab(grabbed_ingredients("X")).
+
+// How many ingredients have you passed to me?
+chat_vocab(ingredients_passed("X")).
+
+// --- Initialisation counters belief ---
+
+soups_served(0).
+grabbed_ingredients(0).
+ingredients_passed(0).
+
 // -----------------------------------------------
 // Focus & Ignore logic (Deductions and Wrappers)
 // -----------------------------------------------
@@ -50,9 +71,18 @@ adjacent(X, Y, Z, M) :- (X = Z & ((Y=M+1) | (Y=M-1))) | (Y=M & ((X = Z + 1) | (X
 // --- Inert Vocabulary for Chat Embeddings ---
 // These beliefs do not trigger any plans. They exist solely to expose valid 
 // domain terminology to the Java/Python Semantic Engine and LLM.
+
+// Chef, I need you to focus on cooking right now.
 chat_vocab(focus(cooking)).
+
+// Please focus on serving, I will handle the rest.
+// I tell you to focus on serving.
 chat_vocab(focus(serving)).
+
+// Leave the kitchen to me, you should ignore cooking for a while.
 chat_vocab(ignore(cooking)).
+
+// Don't worry about it, ignore serving for now.
 chat_vocab(ignore(serving)).
 
 // --- Logical Deduction Rules (What to ignore) ---
@@ -275,11 +305,11 @@ placedObject(Thing,X,Y) :-
 // --------------------------
 
 // True if no pots contain ingredients
- empty_pots :-
+empty_pots :-
     not (pot_contents(X,Y, onion, OCount)) &
-  not (pot_contents(X,Y, tomato, TCount)) &
-  not (pot_contents(Z,M, onion, OCount)) &
-  not (pot_contents(Z,M, tomato, TCount)).
+    not (pot_contents(X,Y, tomato, TCount)) &
+    not (pot_contents(Z,M, onion, OCount)) &
+    not (pot_contents(Z,M, tomato, TCount)).
 
 // Agent has access to all key kitchen areas
 can_reach_all :-
@@ -368,25 +398,50 @@ can_reach_all_human :-
 //               other recipes first. For more info on this please check get_recipe_at_index.java
 //
 // Base case: The orders list has been completed and therefore we can exit the plan.
-+!can_reach_ingredients_only(N) : (can_use_agent(onion,Z,M)| can_use_agent(tomato,P,T)) & cannot_use_agent(serve,A,B) & cannot_use_agent(plate,C,D)
-& cannot_use_agent(pot,E,F) & recipes([])
++!can_reach_ingredients_only(N) : (can_use_agent(onion,Z,M)| can_use_agent(tomato,P,T)) 
+& cannot_use_agent(serve,A,B) & cannot_use_agent(plate,C,D) & cannot_use_agent(pot,E,F) & recipes([])
 <-
     thought("Done - I can only reach ingredients and all recipes are finished");
     .print("Case: agent can only reach ingredients. All recipes have now been completed.").
 
-// Recursive case: There is still orders to be made. In this case for each order we pass the ingredients to the human and
-// do a call to the plan again so that we can proceed with the rest of the recipes.
-+!can_reach_ingredients_only(N) : (can_use_agent(onion,Z,M)| can_use_agent(tomato,P,T)) & recipes(Recipes) & cannot_use_agent(serve,A,B) & cannot_use_agent(plate,C,D)
-& cannot_use_agent(pot,E,F)
+// Onions: if we pass an onion can the human place it in any of the pots? if yes, pass it and if not - ignore (handled in the "pass" plan)
++!can_reach_ingredients_only(N) : all_pots(used) & (can_use_agent(onion,Z,M) | can_use_agent(tomato,P,T)) & recipes(Recipes)
+& .findall(active_pot(Xp, Yp), active_pot(Xp, Yp), AllPots) & not ( AllPots = [] ) & N=1
+& cannot_use_agent(plate,X,Y) & cannot_use_agent(pot,A,B) & cannot_use_agent(serve,C,D) & object(counterTo, W,S)
 <-
-    my.internal.actions.get_recipe_at_index(Recipes, N, CurrentRecipe);
-    ?countInRecipe(onion, CurrentRecipe, OnionCount);
-    ?countInRecipe(tomato, CurrentRecipe, TomatoCount);
-    thought("Passing ingredients to human for recipe " , CurrentRecipe);
-    !pass_to_human(onion,OnionCount);
-    !pass_to_human(tomato,TomatoCount);
-    Nnew = N+1; 
-    !can_reach_ingredients_only(Nnew). // Pass ingredients for the next recipe now
+    my.internal.actions.get_pot(AllPots, Recipes, onion, A,B);
+    !pass(A,B,onion);
+    .wait(200);
+    Nnew=N+1; // now try to pass a tomato
+    !can_reach_ingredients_only(Nnew).
+
+// Tomatoes: if we pass a tomato can the human place it in any of the pots? if yes, pass it and if not - ignore (handled in the "pass" plan)
++!can_reach_ingredients_only(N) : all_pots(used) & (can_use_agent(onion,Z,M) | can_use_agent(tomato,P,T)) & recipes(Recipes)
+& .findall(active_pot(Xp, Yp), active_pot(Xp, Yp), AllPots) & not ( AllPots = [] ) & N=2
+& cannot_use_agent(plate,X,Y) & cannot_use_agent(pot,A,B) & cannot_use_agent(serve,C,D) & object(counterTo, W,S)
+<-
+    my.internal.actions.get_pot(AllPots, Recipes, tomato, A,B);
+    !pass(A,B,tomato);
+    .wait(200);
+    Nnew=N-1; // now try to pass an onion
+    !can_reach_ingredients_only(Nnew).
+
+// First goal: "activate" all of the pots by calling choose_pot_for recipe so that we can keep track of pots by adding them in the belief base
++!can_reach_ingredients_only(N) : recipes([FirstRecipe|_]) & not all_pots(used) & (can_use_agent(onion,Z,M) | can_use_agent(tomato,P,T)) 
+& cannot_use_agent(plate,X,Y) & cannot_use_agent(pot,A,B) & cannot_use_agent(serve,C,D)
+<-
+    .print("Activating pots...");
+    !choose_pot_for_recipe;
+    .wait(400);
+    !can_reach_ingredients_only(N).
+
+// Waiting: there is not free counter so we wait
++!can_reach_ingredients_only(N) : all_pots(used) & (can_use_agent(onion,Z,M) | can_use_agent(tomato,P,T)) 
+& cannot_use_agent(plate,X,Y) & cannot_use_agent(pot,A,B) & cannot_use_agent(serve,C,D)
+<- 
+    .wait(200);
+    .print("Waiting for a free counter...");
+    !can_reach_ingredients_only(N).
 
 // Fail condition: this plan was not applicable, so we exit it and do not execute it.
 +!can_reach_ingredients_only(N)
@@ -458,6 +513,7 @@ can_reach_all_human :-
     thought("I will serve this soup now");
     !go_to(placed_soup);
     !go_to(serve);
+    ?soups_served(S); -+soups_served(S+1);
     !can_reach_serve_only.
 
 // Waiting: wait until a soup is passed by the human
@@ -597,7 +653,7 @@ can_reach_all_human :-
     Nnew=N+1; // now try to pass a tomato
     !can_reach_ingredients_plates(Nnew).
 
-// Tomatoes: if we pass an onion can the human place it in any of the pots? if yes, pass it and if not - ignore (handled in the "pass" plan)
+// Tomatoes: if we pass a tomato can the human place it in any of the pots? if yes, pass it and if not - ignore (handled in the "pass" plan)
 +!can_reach_ingredients_plates(N) : all_pots(used) & (can_use_agent(onion,Z,M) | can_use_agent(tomato,P,T)) & can_use_agent(plate,X,Y) & recipes(Recipes)
 & .findall(active_pot(Xp, Yp), active_pot(Xp, Yp), AllPots) & not ( AllPots = [] ) & N=2
 & cannot_use_agent(pot,Q,R) & cannot_use_agent(serve,C,D) & object(counterTo, W,S)
@@ -810,6 +866,7 @@ can_reach_all_human :-
 <- 
     !go_to(placed_soup);
     !go_to(serve);
+    ?soups_served(S); -+soups_served(S+1);
     .wait(400);
     !can_reach_plates_serve.
 
@@ -863,6 +920,7 @@ can_reach_all_human :-
     !go_to(placed_dish);
     !go_to(active_pot,A,B);
     !go_to(serve);
+    ?soups_served(S); -+soups_served(S+1);
     !can_reach_pots_serve.
 
 // Case 1: we passed an onion to the agent -> check if it can be placed in any pot by using the internal function. If not, move the onion away from the counter to free up space (this
@@ -928,6 +986,7 @@ can_reach_all_human :-
 <-
     !go_to(placed_soup);
     !go_to(serve);
+    ?soups_served(S); -+soups_served(S+1);
     !can_reach_ingredients_serve(N).
 
 // Onions: if we pass an onion can the human place it in any of the pots? if yes, pass it and if not - ignore (handled in the "pass" plan)
@@ -1004,6 +1063,7 @@ can_reach_all_human :-
 <-
     !go_to(placed_soup);
     !go_to(serve);
+    ?soups_served(S); -+soups_served(S+1);
     !can_reach_ingplserve(N).
 
 // Secondary goal: if a soup is cooked -> pass a plate 
@@ -1161,6 +1221,7 @@ can_use_agent(pot,A,B) & cannot_use_agent(serve,C,D) & can_use_agent(plate,E,F)
     !go_to(placed_dish);
     !go_to(active_pot,X,Y);
     !go_to(serve);
+    ?soups_served(S); -+soups_served(S+1);
     !can_reach_ingpotserve(N).
 
 // Move on: if a recipe was cooked, go on to the next recipe from the orders list
@@ -1240,6 +1301,7 @@ can_use_agent(pot,A,B) & cannot_use_agent(serve,C,D) & can_use_agent(plate,E,F)
     !go_to(plate);
     !go_to(active_pot,K,L);
     !go_to(serve);
+    ?soups_served(S); -+soups_served(S+1);
     .wait(400);
     !can_reach_serveplpots.
 
@@ -1323,12 +1385,13 @@ PlateHuman < PlateAgent & pot_ready(A,B)
 
 // If soup is ready and agent is closer to the plate: agent serves
 +!can_reach_allfour(N) : all_pots(used) & can_reach_all & can_reach_all_human & recipes(Recipes) & route_cost_human(plate,PlateHuman) & route_cost(plate,PlateAgent) &
-PlateHuman > PlateAgent & pot_ready(A,B)
+PlateHuman >= PlateAgent & pot_ready(A,B)
 <-
     thought("I'm closer, I'll serve the soup");
     !go_to(plate);
     !go_to(active_pot,A,B);
     !go_to(serve);
+    ?soups_served(S); -+soups_served(S+1);
     !can_reach_allfour(N).
 
 // Step: add an onion to the pots (when N = 1)
@@ -1389,7 +1452,8 @@ PlateHuman > PlateAgent & pot_ready(A,B)
     thought("Human didn't serve, I'll do it");
     !go_to(plate);
     !go_to(active_pot,A,B);
-    !go_to(serve).
+    !go_to(serve);
+    ?soups_served(S); -+soups_served(S+1).
 
 // Fallback: human already served, no action required
 +!serve_if_no_human : all_pots(used) & can_reach_all & can_reach_all_human & recipes(Recipes) & not (pot_ready(A,B))
@@ -1582,6 +1646,7 @@ PlateHuman > PlateAgent & pot_ready(A,B)
     !go_to(Thing);
     thought("Now going to the pot");
     !go_to(active_pot,X,Y);
+    ?grabbed_ingredients(G); -+grabbed_ingredients(G+1);
     thought("Time to cook");
     !execute;
     compute_path(A,B);
@@ -1594,7 +1659,8 @@ PlateHuman > PlateAgent & pot_ready(A,B)
     compute_path(A,B);
     !go_to(Thing);
     .wait(300);
-    !go_to(active_pot,X,Y).
+    !go_to(active_pot,X,Y);
+    ?grabbed_ingredients(G); -+grabbed_ingredients(G+1).
 
 // The soup is ready
 +!load(X,Y,Thing) : X = 999 & Y = 999 & can_use_agent(Thing,M,N) & pot_contents(A,B,onion,3) & object(Thing,C,D)
@@ -1627,7 +1693,8 @@ PlateHuman > PlateAgent & pot_ready(A,B)
 +!pass(X,Y,Thing) : X < 999 & Y < 999 & active_pot(X,Y) & object(counterTo,Z,M) 
 <-
     !go_to(Thing);
-
+    ?grabbed_ingredients(G); -+grabbed_ingredients(G+1);
+    ?ingredients_passed(I); -+ingredients_passed(I+1);
     .wait(300);
     !go_to(counterTo).
 
@@ -1700,7 +1767,8 @@ PlateHuman > PlateAgent & pot_ready(A,B)
 +!discard_soup(Z,M) : pot_ready(Z,M)
 <-
     !go_to(active_pot,Z,M);
-    !go_to(serve).
+    !go_to(serve);
+    ?soups_served(S); -+soups_served(S+1).
     
 +!discard_soup(Z,M) : not (pot_ready(Z,M)) & not (pot_cooking(Z,M))
 <-

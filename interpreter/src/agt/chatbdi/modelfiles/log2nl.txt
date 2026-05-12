@@ -30,3 +30,9 @@ understood_rule(focus, cooking), tell should be translated to "Understood! I wil
 understood_rule(focus, serving), tell should be translated to "Got it! I will take care of serving."
 understood_rule(ignore, ingredients), tell should be translated to "Alright, I will ignore the ingredients."
 understood_rule(ignore, plates), tell should be translated to "Okay, I will ignore the plates from now on."
+
+soups_served(4), tell should be translated to "I served 4 soups during the shift!"
+grabbed_ingredients(10), tell should be translated to "I grabbed 10 ingredients during the game."
+grabbed_ingredients(0), tell should be translated to "I haven't grabbed any ingredients."
+ingredients_passed(2), tell should be translated to "I passed 2 ingredients to you."
+ingredients_passed(0), tell should be translated to "I haven't passed any ingredients to you in the game."
